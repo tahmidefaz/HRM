@@ -101,7 +101,10 @@ class ACTLossHead(Module):
         # Binary cross entropy with logits for q_halt_loss
         q_halt_logits = outputs["q_halt_logits"]
         seq_is_correct_float = seq_is_correct.astype(q_halt_logits.dtype)
-        q_halt_loss = mx.sum(-seq_is_correct_float * mx.log_sigmoid(q_halt_logits) - (1 - seq_is_correct_float) * mx.log_sigmoid(-q_halt_logits))
+        # Manual log_sigmoid implementation since mx.log_sigmoid may not be available
+        log_sigmoid_pos = -mx.logaddexp(0.0, -q_halt_logits)
+        log_sigmoid_neg = -mx.logaddexp(0.0, q_halt_logits)
+        q_halt_loss = mx.sum(-seq_is_correct_float * log_sigmoid_pos - (1 - seq_is_correct_float) * log_sigmoid_neg)
 
         metrics.update({
             "lm_loss": mx.stop_gradient(lm_loss),
@@ -113,7 +116,10 @@ class ACTLossHead(Module):
         if "target_q_continue" in outputs:
             q_continue_logits = outputs["q_continue_logits"]
             target_q_continue = outputs["target_q_continue"]
-            q_continue_loss = mx.sum(-target_q_continue * mx.log_sigmoid(q_continue_logits) - (1 - target_q_continue) * mx.log_sigmoid(-q_continue_logits))
+            # Manual log_sigmoid implementation since mx.log_sigmoid may not be available
+            log_sigmoid_pos = -mx.logaddexp(0.0, -q_continue_logits)
+            log_sigmoid_neg = -mx.logaddexp(0.0, q_continue_logits)
+            q_continue_loss = mx.sum(-target_q_continue * log_sigmoid_pos - (1 - target_q_continue) * log_sigmoid_neg)
 
             metrics["q_continue_loss"] = mx.stop_gradient(q_continue_loss)
 
