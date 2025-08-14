@@ -4,8 +4,7 @@ import json
 import numpy as np
 import pydantic
 
-import torch
-from torch.utils.data import IterableDataset, get_worker_info
+import mlx.core as mx
 
 from models.losses import IGNORE_LABEL_ID
 from dataset.common import PuzzleDatasetMetadata
@@ -46,13 +45,14 @@ class PuzzleDatasetConfig(pydantic.BaseModel):
 
     epochs_per_iter: int  # Batch X epochs in an iteration to reduce overhead.
 
-    rank: int
-    num_replicas: int
+    rank: int = 0
+    num_replicas: int = 1
 
 
-class PuzzleDataset(IterableDataset):
+class PuzzleDataset:
+    """MLX-compatible puzzle dataset"""
+    
     def __init__(self, config: PuzzleDatasetConfig, split: str = "train"):
-        super().__init__()
         self.config = config
         self.split = split
         self.metadata = self._load_metadata()
@@ -112,8 +112,8 @@ class PuzzleDataset(IterableDataset):
             }
             batch = {k: np.pad(v, ((0, pad_size), ) + ((0, 0), ) * (v.ndim - 1), constant_values=pad_values[k]) for k, v in batch.items()}
 
-        # To tensor
-        return {k: torch.from_numpy(v) for k, v in batch.items()}
+        # Convert to MLX arrays
+        return {k: mx.array(v) for k, v in batch.items()}
     
     def _iter_test(self):
         for set_name, dataset in self._data.items():  # type: ignore
@@ -187,9 +187,6 @@ class PuzzleDataset(IterableDataset):
                 yield set_name, batch, global_effective_batch_size
                 
     def __iter__(self):
-        worker_info = get_worker_info()
-        assert worker_info is None or worker_info.num_workers == 1, "Multithreaded data loading is not currently supported."
-        
         self._lazy_load_dataset()
         
         # Iterate using specified mode

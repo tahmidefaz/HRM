@@ -1,132 +1,65 @@
 from typing import Union
+import math
 
-import torch
-from torch import nn
-import torch.distributed as dist
-from torch.optim.optimizer import Optimizer, ParamsT
-
-from models.common import trunc_normal_init_
+import mlx.core as mx
+import mlx.nn as nn
+from mlx.nn.layers.base import Module
+import mlx.optimizers as optim
 
 
-class CastedSparseEmbedding(nn.Module):
-    def __init__(self, num_embeddings: int, embedding_dim: int, batch_size: int, init_std: float, cast_to: torch.dtype):
+class CastedSparseEmbedding(Module):
+    def __init__(self, num_embeddings: int, embedding_dim: int, batch_size: int, init_std: float = 0.0):
         super().__init__()
-        self.cast_to = cast_to
-
-        # Real Weights
-        # Truncated LeCun normal init
-        self.weights = nn.Buffer(
-            trunc_normal_init_(torch.empty((num_embeddings, embedding_dim)), std=init_std), persistent=True
-        )
-
-        # Local weights and IDs
-        # Local embeddings, with gradient, not persistent
-        self.local_weights = nn.Buffer(torch.zeros(batch_size, embedding_dim, requires_grad=True), persistent=False)
-        # Local embedding IDs, not persistent
-        self.local_ids = nn.Buffer(torch.zeros(batch_size, dtype=torch.int32), persistent=False)
-
-    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        if not self.training:
-            # Test mode, no gradient
-            return self.weights[inputs].to(self.cast_to)
-            
-        # Training mode, fill puzzle embedding from weights
-        with torch.no_grad():
-            self.local_weights.copy_(self.weights[inputs])
-            self.local_ids.copy_(inputs)
-
-        return self.local_weights.to(self.cast_to)
-
-
-class CastedSparseEmbeddingSignSGD_Distributed(Optimizer):
-    def __init__(
-        self,
-        params: ParamsT,
-
-        world_size: int,
-        lr: Union[float, torch.Tensor] = 1e-3,
-        weight_decay: float = 1e-2,
-    ):
-        if not 0.0 <= lr:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if not 0.0 <= weight_decay:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-
-        defaults = dict(
-            lr=lr,
-            weight_decay=weight_decay,
-            world_size=world_size
-        )
-        super().__init__(params, defaults)
-
-    @torch.no_grad
-    def step(self, closure=None):  # type: ignore
-        for group in self.param_groups:
-            # Find the sparse embedding weights
-            local_weights_grad = None
-            local_ids = None
-            weights = None
-            
-            assert len(group["params"]) == 3
-            for p in group["params"]:
-                if p.requires_grad:
-                    local_weights_grad = p.grad
-                elif p.ndim == 1:
-                    local_ids = p
-                elif p.ndim == 2:
-                    weights = p
-                else:
-                    assert False
-                
-            assert local_weights_grad is not None
-            assert local_ids is not None
-            assert weights is not None
         
-            # Apply SignSGD
-            # Adam ≈ SignSGD if gradient is very sparse
-            _sparse_emb_signsgd_dist(
-                local_weights_grad,
-                local_ids,
-                weights,
-                
-                lr=group["lr"],
-                weight_decay=group["weight_decay"],
-                world_size=group["world_size"]
-            )
+        # Real Weights - initialized with truncated normal
+        if init_std > 0:
+            self.weights = mx.random.normal((num_embeddings, embedding_dim)) * init_std
+        else:
+            self.weights = mx.zeros((num_embeddings, embedding_dim))
+
+        # Local weights and IDs for training
+        self.local_weights = mx.zeros((batch_size, embedding_dim))
+        self.local_ids = mx.zeros((batch_size,), dtype=mx.int32)
+        self.batch_size = batch_size
+
+    def __call__(self, inputs: mx.array) -> mx.array:
+        # In MLX, we don't have explicit training mode, so we'll simulate it
+        # For now, always use weights directly - gradient handling will be different
+        return self.weights[inputs]
+
+    def update_local_state(self, inputs: mx.array):
+        """Update local state for training - called externally when needed"""
+        self.local_weights = self.weights[inputs]
+        self.local_ids = inputs
 
 
-def _sparse_emb_signsgd_dist(
-    local_weights_grad: torch.Tensor,
-    local_ids: torch.Tensor,
-    weights: torch.Tensor,
+class SparseEmbeddingSignSGD:
+    """MLX version of sparse embedding optimizer using SignSGD"""
     
-    lr: float,
-    weight_decay: float,
-    world_size: int
-) -> None:
-    N, D = local_weights_grad.shape
+    def __init__(self, lr: float = 1e-3, weight_decay: float = 1e-2):
+        self.lr = lr
+        self.weight_decay = weight_decay
     
-    # All-gather
-    all_weights_grad = local_weights_grad
-    all_ids = local_ids
-
-    if world_size > 1:
-        all_weights_grad = torch.empty((world_size * N, D), dtype=local_weights_grad.dtype, device=local_weights_grad.device)
-        all_ids = torch.empty(world_size * N,               dtype=local_ids.dtype,          device=local_ids.device)
-    
-        dist.all_gather_into_tensor(all_weights_grad, local_weights_grad)
-        dist.all_gather_into_tensor(all_ids,          local_ids)
-
-    # Unique
-    grad_ids, inv = all_ids.unique(return_inverse=True)
-
-    grad = torch.zeros((grad_ids.shape[0], D), dtype=all_weights_grad.dtype, device=all_weights_grad.device)
-    grad.scatter_add_(0, inv.unsqueeze(-1).expand(-1, D), all_weights_grad)
-
-    # SignSGD with decoupled weight decay
-    p = weights[grad_ids]
-
-    p.mul_(1.0 - lr * weight_decay).add_(torch.sign(grad), alpha=-lr)
-
-    # Write updated slices back
-    weights[grad_ids] = p
+    def update(self, sparse_emb: CastedSparseEmbedding, gradients: mx.array, indices: mx.array):
+        """Update sparse embedding weights using SignSGD"""
+        if gradients is None or indices is None:
+            return
+            
+        # Get unique indices and aggregate gradients
+        unique_indices, inverse_indices = mx.unique(indices, return_inverse=True)
+        
+        # Aggregate gradients for duplicate indices
+        aggregated_grads = mx.zeros((len(unique_indices), gradients.shape[-1]))
+        for i, grad in enumerate(gradients):
+            idx_pos = mx.where(unique_indices == indices[i])[0][0]
+            aggregated_grads = aggregated_grads.at[idx_pos].add(grad)
+        
+        # Get current weights for these indices
+        current_weights = sparse_emb.weights[unique_indices]
+        
+        # Apply SignSGD with decoupled weight decay
+        updated_weights = current_weights * (1.0 - self.lr * self.weight_decay)
+        updated_weights = updated_weights - self.lr * mx.sign(aggregated_grads)
+        
+        # Update the weights
+        sparse_emb.weights = sparse_emb.weights.at[unique_indices].set(updated_weights)

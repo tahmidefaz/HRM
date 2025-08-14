@@ -12,21 +12,11 @@ These results underscore HRM’s potential as a transformative advancement towar
 
 ### Prerequisites ⚙️
 
-Ensure PyTorch and CUDA are installed. The repo needs CUDA extensions to be built. If not present, run the following commands:
+Ensure MLX is installed. This repo uses Apple's MLX framework for Apple Silicon devices.
 
 ```bash
-# Install CUDA 12.6
-CUDA_URL=https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_560.35.05_linux.run
-
-wget -q --show-progress --progress=bar:force:noscroll -O cuda_installer.run $CUDA_URL
-sudo sh cuda_installer.run --silent --toolkit --override
-
-export CUDA_HOME=/usr/local/cuda-12.6
-
-# Install PyTorch with CUDA 12.6
-PYTORCH_INDEX_URL=https://download.pytorch.org/whl/cu126
-
-pip3 install torch torchvision torchaudio --index-url $PYTORCH_INDEX_URL
+# Install MLX
+pip install mlx
 
 # Additional packages for building extensions
 pip3 install packaging ninja wheel setuptools setuptools-scm
