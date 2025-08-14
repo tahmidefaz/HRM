@@ -1,5 +1,6 @@
-torch
-adam-atan2
+mlx
+mlx-lm
+numpy
 einops
 tqdm
 coolname
