@@ -22,19 +22,6 @@ pip install mlx
 pip3 install packaging ninja wheel setuptools setuptools-scm
 ```
 
-Then install FlashAttention. For Hopper GPUs, install FlashAttention 3
-
-```bash
-git clone git@github.com:Dao-AILab/flash-attention.git
-cd flash-attention/hopper
-python setup.py install
-```
-
-For Ampere or earlier GPUs, install FlashAttention 2
-
-```bash
-pip3 install flash-attn
-```
 
 ## Install Python Dependencies 🐍
 
@@ -54,17 +41,17 @@ wandb login
 
 ### Quick Demo: Sudoku Solver 💻🗲
 
-Train a master-level Sudoku AI capable of solving extremely difficult puzzles on a modern laptop GPU. 🧩
+Train a master-level Sudoku AI capable of solving extremely difficult puzzles on Apple Silicon. 🧩
 
 ```bash
 # Download and build Sudoku dataset
 python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1000  --subsample-size 1000 --num-aug 1000
 
-# Start training (single GPU, smaller batch size)
-OMP_NUM_THREADS=8 python pretrain.py data_path=data/sudoku-extreme-1k-aug-1000 epochs=20000 eval_interval=2000 global_batch_size=384 lr=7e-5 puzzle_emb_lr=7e-5 weight_decay=1.0 puzzle_emb_weight_decay=1.0
+# Start training
+WANDB_MODE=disabled python pretrain.py data_path=data/sudoku-extreme-1k-aug-1000 epochs=20000 eval_interval=2000 global_batch_size=384 lr=7e-5 puzzle_emb_lr=7e-5 weight_decay=1.0 puzzle_emb_weight_decay=1.0
 ```
 
-Runtime: ~10 hours on a RTX 4070 laptop GPU
+Runtime: varies depending on Apple Silicon chip
 
 ## Trained Checkpoints 🚧
 
@@ -74,9 +61,7 @@ Runtime: ~10 hours on a RTX 4070 laptop GPU
 
 To use the checkpoints, see Evaluation section below.
 
-## Full-scale Experiments 🔵
-
-Experiments below assume an 8-GPU setup.
+## Additional Experiments 🔵
 
 ### Dataset Preparation
 
@@ -111,42 +96,32 @@ Explore the puzzles visually:
 ARC-1:
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py 
+python pretrain.py
 ```
-
-*Runtime:* ~24 hours
 
 ARC-2:
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py data_path=data/arc-2-aug-1000
+python pretrain.py data_path=data/arc-2-aug-1000
 ```
-
-*Runtime:* ~24 hours (checkpoint after 8 hours is often sufficient)
 
 Sudoku Extreme (1k):
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py data_path=data/sudoku-extreme-1k-aug-1000 epochs=20000 eval_interval=2000 lr=1e-4 puzzle_emb_lr=1e-4 weight_decay=1.0 puzzle_emb_weight_decay=1.0
+python pretrain.py data_path=data/sudoku-extreme-1k-aug-1000 epochs=20000 eval_interval=2000 lr=1e-4 puzzle_emb_lr=1e-4 weight_decay=1.0 puzzle_emb_weight_decay=1.0
 ```
-
-*Runtime:* ~10 minutes
 
 Maze 30x30 Hard (1k):
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py data_path=data/maze-30x30-hard-1k epochs=20000 eval_interval=2000 lr=1e-4 puzzle_emb_lr=1e-4 weight_decay=1.0 puzzle_emb_weight_decay=1.0
+python pretrain.py data_path=data/maze-30x30-hard-1k epochs=20000 eval_interval=2000 lr=1e-4 puzzle_emb_lr=1e-4 weight_decay=1.0 puzzle_emb_weight_decay=1.0
 ```
-
-*Runtime:* ~1 hour
 
 ### Full Sudoku-Hard
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py data_path=data/sudoku-hard-full epochs=100 eval_interval=10 lr_min_ratio=0.1 global_batch_size=2304 lr=3e-4 puzzle_emb_lr=3e-4 weight_decay=0.1 puzzle_emb_weight_decay=0.1 arch.loss.loss_type=softmax_cross_entropy arch.L_cycles=8 arch.halt_max_steps=8 arch.pos_encodings=learned
+python pretrain.py data_path=data/sudoku-hard-full epochs=100 eval_interval=10 lr_min_ratio=0.1 global_batch_size=2304 lr=3e-4 puzzle_emb_lr=3e-4 weight_decay=0.1 puzzle_emb_weight_decay=0.1 arch.loss.loss_type=softmax_cross_entropy arch.L_cycles=8 arch.halt_max_steps=8 arch.pos_encodings=learned
 ```
-
-*Runtime:* ~2 hours
 
 ## Evaluation
 
@@ -156,7 +131,7 @@ Evaluate your trained models:
 * For ARC-AGI, follow these additional steps:
 
 ```bash
-OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 evaluate.py checkpoint=<CHECKPOINT_PATH>
+python evaluate.py checkpoint=<CHECKPOINT_PATH>
 ```
 
 * Then use the provided `arc_eval.ipynb` notebook to finalize and inspect your results.

@@ -222,7 +222,7 @@ def value_and_grad_fn(model, batch, global_batch_size, return_keys):
         
         return scaled_loss, (new_carry, metrics, outputs, all_finish)
     
-    return mx.value_and_grad(forward_fn, has_aux=True)
+    return mx.value_and_grad(forward_fn)
 
 
 def train_batch(config: PretrainConfig, train_state: TrainState, batch: Any, global_batch_size: int):
@@ -237,7 +237,8 @@ def train_batch(config: PretrainConfig, train_state: TrainState, batch: Any, glo
     vg_fn = value_and_grad_fn(train_state.model, batch, global_batch_size, [])
     
     # Forward and backward
-    (loss, (new_carry, metrics, _, _)), grads = vg_fn(train_state.model.parameters())
+    loss_and_aux, grads = vg_fn(train_state.model.parameters())
+    loss, (new_carry, metrics, _, _) = loss_and_aux
     
     # Update carry
     train_state.carry = new_carry
